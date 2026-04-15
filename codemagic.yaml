@@ -12,17 +12,26 @@ workflows:
         APP_PACKAGE_NAME: "com.droidify.myapp"
     scripts:
       - name: Install dependencies
-        script: npm install
+        script: |
+          npm install
+
       - name: Configure app
-        script: node scripts/configure.js
+        script: |
+          node scripts/configure.js
+
       - name: Add Android platform
         script: |
           npx cap add android || true
           npx cap sync android
+
       - name: Set Android permissions
-        script: node scripts/set-permissions.js
+        script: |
+          node scripts/set-permissions.js
+
       - name: Apply native enhancements
-        script: node scripts/enhance-native.js
+        script: |
+          node scripts/enhance-native.js
+
       - name: Configure release signing
         script: |
           KEYSTORE_PATH="$HOME/.android/debug.keystore"
@@ -62,6 +71,7 @@ workflows:
 
           gradle_file.write_text(text)
           PY
+
       - name: Build Android AAB and APK
         script: |
           cd android
