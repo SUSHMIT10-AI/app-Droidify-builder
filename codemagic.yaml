@@ -5,7 +5,7 @@ workflows:
     instance_type: mac_mini_m1
     environment:
       java: 17
-      node: 18
+      node: 20
       vars:
         APP_URL: "https://example.com"
         APP_NAME: "MyApp"
@@ -14,6 +14,11 @@ workflows:
       - name: Install dependencies
         script: |
           npm install
+
+      - name: Build Web Assets
+        script: |
+          # Ensure web assets are built before Capacitor tries to sync them
+          npm run build --if-present
 
       - name: Configure app
         script: |
@@ -34,8 +39,10 @@ workflows:
 
       - name: Configure release signing
         script: |
+          # Generate a keystore only if it doesn't exist
           KEYSTORE_PATH="$HOME/.android/debug.keystore"
           if [ ! -f "$KEYSTORE_PATH" ]; then
+            mkdir -p "$HOME/.android"
             keytool -genkey -v -keystore "$KEYSTORE_PATH" \
               -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass android -keypass android \
@@ -45,14 +52,19 @@ workflows:
           export KEYSTORE_PATH
           python3 <<'PY'
           import os
+          import re
           from pathlib import Path
 
           gradle_file = Path("android/app/build.gradle")
           if not gradle_file.exists():
-              raise SystemExit("android/app/build.gradle not found")
+              print("Warning: android/app/build.gradle not found. Skipping injection.")
+              exit(0)
 
           text = gradle_file.read_text()
-          signing_block = f'''signingConfigs {{
+          
+          # Configuration block to inject
+          signing_config = f'''
+    signingConfigs {{
         release {{
             storeFile file("{os.environ["KEYSTORE_PATH"]}")
             storePassword "android"
@@ -60,14 +72,15 @@ workflows:
             keyPassword "android"
         }}
     }}
-
-    buildTypes {{'''
-
+'''
+          # 1. Inject signingConfigs before buildTypes
           if "signingConfigs {" not in text:
-              text = text.replace("buildTypes {", signing_block, 1)
+              text = re.sub(r"(buildTypes\s*\{)", signing_config + r"\1", text)
 
+          # 2. Inject the signingConfig reference into the release block
+          # Matches 'release {' and ensures we don't double-inject
           if "signingConfig signingConfigs.release" not in text:
-              text = text.replace("release {", "release {\n            signingConfig signingConfigs.release", 1)
+              text = re.sub(r"(release\s*\{)", r"\1\n            signingConfig signingConfigs.release", text)
 
           gradle_file.write_text(text)
           PY
@@ -75,6 +88,7 @@ workflows:
       - name: Build Android AAB and APK
         script: |
           cd android
+          chmod +x gradlew
           ./gradlew bundleRelease assembleRelease
 
     artifacts:
